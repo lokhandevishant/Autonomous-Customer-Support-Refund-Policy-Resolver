@@ -56,7 +56,7 @@ POLICIES_DB = {
 }
 
 # =====================================================================
-# 2. CSV HELPER FUNCTIONS (Read & Write Directly to orders_data.csv)
+# 2. CSV HELPER FUNCTIONS (Read, Write & Reset Directly to orders_data.csv)
 # =====================================================================
 def load_orders_from_csv(filename: str = CSV_FILENAME) -> dict:
     """Load all rows from orders_data.csv into a dictionary keyed by order_id."""
@@ -71,7 +71,7 @@ def load_orders_from_csv(filename: str = CSV_FILENAME) -> dict:
 
 
 def save_orders_to_csv(orders: dict, filename: str = CSV_FILENAME):
-    """Write updated order statuses back to orders_data.csv so changes show in Excel."""
+    """Write updated order statuses back to orders_data.csv so changes show in UI/Excel."""
     fieldnames = [
         "order_id", "customer_name", "customer_tier", "item", "category",
         "amount", "days_since_purchase", "status",
@@ -84,6 +84,18 @@ def save_orders_to_csv(orders: dict, filename: str = CSV_FILENAME):
             writer.writerow(order)
 
 
+def reset_all_orders_to_pending(filename: str = CSV_FILENAME):
+    """Reset all 105 orders back to PENDING for a clean demo slate."""
+    global ORDERS_DB, ACTION_LOG
+    ORDERS_DB = load_orders_from_csv(filename)
+    for oid in ORDERS_DB:
+        ORDERS_DB[oid]["resolution_action"] = "PENDING"
+        ORDERS_DB[oid]["ticket_id"] = ""
+        ORDERS_DB[oid]["resolution_reason"] = ""
+    save_orders_to_csv(ORDERS_DB, filename)
+    ACTION_LOG.clear()
+
+
 # Load the 105 orders from CSV at startup
 ORDERS_DB = load_orders_from_csv()
 ACTION_LOG = []
@@ -94,12 +106,14 @@ ACTION_LOG = []
 # =====================================================================
 def get_order_details(order_id: str) -> str:
     """Tool 1: Fetch order details from the CSV database by order_id."""
+    global ORDERS_DB
+    ORDERS_DB = load_orders_from_csv()  # Ensure fresh state
     order = ORDERS_DB.get(order_id.strip().upper())
     if not order:
         return json.dumps({
             "error": f"Order '{order_id}' not found in {CSV_FILENAME}. Valid IDs are ORD-1001 to ORD-1105."
-        })
-    return json.dumps(order)
+        }, ensure_ascii=False)
+    return json.dumps(order, ensure_ascii=False)
 
 
 def check_return_policy(category: str, customer_tier: str) -> str:
@@ -115,7 +129,7 @@ def check_return_policy(category: str, customer_tier: str) -> str:
     if not matched_policy:
         return json.dumps({
             "error": f"No policy found for category '{category}'. Valid categories: {list(POLICIES_DB.keys())}"
-        })
+        }, ensure_ascii=False)
 
     allowed_days = (
         matched_policy["gold_tier_return_window_days"]
@@ -128,7 +142,7 @@ def check_return_policy(category: str, customer_tier: str) -> str:
         "allowed_return_window_days": allowed_days,
         "max_auto_refund_amount": matched_policy["max_auto_refund_amount"],
         "policy_notes": matched_policy["notes"]
-    })
+    }, ensure_ascii=False)
 
 
 def process_refund_or_escalate(order_id: str, action: str, reason: str) -> str:
@@ -136,6 +150,8 @@ def process_refund_or_escalate(order_id: str, action: str, reason: str) -> str:
     Tool 3: Execute the final decision and persist it directly back to orders_data.csv.
     action must be one of: 'APPROVE_REFUND', 'ESCALATE_TO_HUMAN', or 'REJECT_REFUND'.
     """
+    global ORDERS_DB
+    ORDERS_DB = load_orders_from_csv()
     oid = order_id.strip().upper()
     ticket_id = f"TCK-{len(ACTION_LOG) + 5001}"
 
@@ -158,7 +174,7 @@ def process_refund_or_escalate(order_id: str, action: str, reason: str) -> str:
         "status": "SUCCESS_SAVED_TO_CSV",
         "csv_file_updated": CSV_FILENAME,
         "record": record
-    })
+    }, ensure_ascii=False)
 
 
 AVAILABLE_FUNCTIONS = {
@@ -227,9 +243,15 @@ TOOLS_SCHEMA = [
 
 
 # =====================================================================
-# 4. THE AGENTIC REASONING LOOP
+# 4. THE AGENTIC REASONING LOOP (Returns structured steps for Streamlit + CLI)
 # =====================================================================
-def run_support_agent(customer_message: str):
+def run_support_agent(customer_message: str) -> dict:
+    """
+    Runs the agentic loop and returns a dictionary containing:
+      - 'customer_message': original input prompt
+      - 'steps': list of tool call traces (step, tool_name, tool_args, tool_output)
+      - 'final_response': the final natural-language answer from the LLM
+    """
     print("\n" + "=" * 75)
     print(f"CUSTOMER TICKET: {customer_message}")
     print("=" * 75)
@@ -254,6 +276,9 @@ def run_support_agent(customer_message: str):
     ]
 
     step = 1
+    executed_steps = []
+    final_response = ""
+
     while True:
         response = client.chat.completions.create(
             model=MODEL,
@@ -267,7 +292,8 @@ def run_support_agent(customer_message: str):
         tool_calls = response_message.tool_calls
 
         if not tool_calls:
-            print(f"\n[AGENT FINAL RESPONSE]:\n{response_message.content}")
+            final_response = response_message.content or ""
+            print(f"\n[AGENT FINAL RESPONSE]:\n{final_response}")
             break
 
         messages.append(response_message)
@@ -277,11 +303,18 @@ def run_support_agent(customer_message: str):
             func_args = json.loads(tool_call.function.arguments)
 
             print(f"  -> Step {step} | Tool Call: {func_name}({func_args})")
-            step += 1
 
             function_to_call = AVAILABLE_FUNCTIONS[func_name]
             tool_output = function_to_call(**func_args)
             print(f"     <- Tool Output: {tool_output}")
+
+            executed_steps.append({
+                "step": step,
+                "tool_name": func_name,
+                "tool_args": func_args,
+                "tool_output": json.loads(tool_output)
+            })
+            step += 1
 
             messages.append({
                 "tool_call_id": tool_call.id,
@@ -290,9 +323,15 @@ def run_support_agent(customer_message: str):
                 "content": tool_output,
             })
 
+    return {
+        "customer_message": customer_message,
+        "steps": executed_steps,
+        "final_response": final_response
+    }
+
 
 # =====================================================================
-# 5. DEMO RUNNER + INTERACTIVE MODE
+# 5. TERMINAL DEMO RUNNER (Only runs if you execute `python3 main.py`)
 # =====================================================================
 if __name__ == "__main__":
     print(f"Loaded {len(ORDERS_DB)} orders from '{CSV_FILENAME}' (ORD-1001 to ORD-1105).")
@@ -302,6 +341,7 @@ if __name__ == "__main__":
     run_support_agent("Please refund my monitor on order ORD-1002, it has a dead pixel.")
     run_support_agent("Can I get a refund for my shoes in order ORD-1003? They don't fit.")
 
+    # Interactive mode: Let your professor pick ANY order from ORD-1001 to ORD-1105 live!
     print("\n" + "=" * 75)
     print("INTERACTIVE DEMO MODE (Type any order ID from ORD-1001 to ORD-1105, or 'exit' to quit)")
     print("=" * 75)
