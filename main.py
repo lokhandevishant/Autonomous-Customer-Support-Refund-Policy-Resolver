@@ -302,7 +302,6 @@ if __name__ == "__main__":
     run_support_agent("Please refund my monitor on order ORD-1002, it has a dead pixel.")
     run_support_agent("Can I get a refund for my shoes in order ORD-1003? They don't fit.")
 
-    # Interactive mode: Let your professor pick ANY order from ORD-1001 to ORD-1105 live!
     print("\n" + "=" * 75)
     print("INTERACTIVE DEMO MODE (Type any order ID from ORD-1001 to ORD-1105, or 'exit' to quit)")
     print("=" * 75)
