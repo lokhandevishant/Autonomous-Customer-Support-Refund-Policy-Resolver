@@ -6,6 +6,10 @@ In modern e-commerce and retail operations, customer support teams spend thousan
 
 This project demonstrates a **modern Agentic AI workflow** powered by the **Groq API** that autonomously resolves customer refund tickets. Instead of merely generating conversational replies, the AI agent uses **3 deterministic function-calling tools** to inspect a local CSV database of 105 orders (`orders_data.csv`), evaluate dynamic policy constraints, execute a binding business decision (`APPROVE_REFUND`, `ESCALATE_TO_HUMAN`, or `REJECT_REFUND`), and write the audit trail directly back into the CSV file.
 
+To ensure enterprise safety and full human control, the project includes an interactive **Streamlit Dashboard (`app.py`)** featuring a **Human-in-the-Loop (HITL) Supervisor Override Panel**.
+
+---
+
 ## 🧠 How the Agentic Workflow Works (3-Tool Loop)
 
 When a customer submits a natural-language refund request (e.g., *"Hi, I want to return my headphones from order ORD-1001"*), the LLM enters an autonomous **Reason + Act (ReAct)** loop:
@@ -25,78 +29,83 @@ When a customer submits a natural-language refund request (e.g., *"Hi, I want to
      * `REJECT_REFUND`: Outside the eligible return window for that customer's tier.
    * **State Persistence:** Automatically updates `orders_data.csv` with the `ticket_id`, `resolution_action`, and `resolution_reason`.
 
-## 🛡️ Why This Architecture is 100% Demo-Proof
+---
 
-* **Zero External Database Flakiness:** Uses a local, deterministic 105-record CSV database (`orders_data.csv`) that can be inspected before and after the run in Microsoft Excel or VS Code.
-* **Deterministic Reasoning (`temperature=0.0`):** Ensures the LLM makes consistent, repeatable tool calls every single time.
-* **Built-In Financial Guardrails:** Demonstrates how enterprise AI agents safely escalate high-value transactions to human supervisors rather than blindly approving expensive refunds.
+## 🛡️ How We Maintain Control Over the System (Guardrails & Human Override)
+
+Enterprise AI agents must never operate without boundaries. This system enforces control at two levels:
+
+1. **Automated Policy & Financial Guardrails:**
+   * **Hard Dollar Caps:** The AI is strictly forbidden from auto-approving refunds above the category's `max_auto_refund_amount` (\$150–\$300). High-value tickets are forced into `ESCALATE_TO_HUMAN`.
+   * **Strict JSON Schema Enum:** The tool schema restricts the LLM's output action to `["APPROVE_REFUND", "ESCALATE_TO_HUMAN", "REJECT_REFUND"]`. It cannot invent unauthorized actions or alter product prices.
+   * **Deterministic Execution (`temperature=0.0`):** Eliminates randomness so identical inputs always yield identical tool calls.
+
+2. **Human-in-the-Loop (HITL) Supervisor Override Panel (`app.py`):**
+   * Whenever the AI flags an order as `ESCALATE_TO_HUMAN` (such as `ORD-1002` for a \$620 monitor), a human manager can use the **Human Supervisor Override Panel** in the Streamlit UI to review the ticket, filter specifically for escalated orders, enter an audit note, and manually override the status to `APPROVE_REFUND` or `REJECT_REFUND`.
+   * The override writes `[HUMAN OVERRIDE]` directly into `orders_data.csv` to maintain a clear audit trail.
+   * A **1-Click Reset Button** (`🔄 Reset All 105 Orders to PENDING`) in the sidebar allows the operator to restore the entire database to its initial state at any time.
+
+---
 
 ## 📂 Project Structure
 
-```
-├── main.py   # Main Python script containing the Agentic loop & 3 tools 
+```text
+├── app.py                # Interactive Streamlit UI with Tool Trace Viewer & Human Override Panel
+├── main.py               # Core Agentic AI loop, Groq API integration, and 3 Python tools
 ├── orders_data.csv       # Local database with 105 orders (ORD-1001 to ORD-1105)
 ├── .env                  # Environment file storing your GROQ_API_KEY
 └── README.md             # Project documentation and setup guide
 ```
 
+---
+
 ## 🚀 Step-by-Step Setup & Execution Guide
 
 ### 1. Prerequisites
-
 * **Python 3.8+** installed on your system.
 * A free **Groq API Key** from [console.groq.com](https://console.groq.com/).
 
 ### 2. Install Dependencies
-
 Open your terminal or command prompt in the project folder and install the required packages:
 
 ```bash
-pip install groq python-dotenv
+pip install streamlit pandas groq python-dotenv
 ```
 
 ### 3. Configure the `.env` File
-
-Create a file named `.env` in the root directory of the project (in the exact same folder as your Python script and `orders_data.csv`) and add your Groq API key:
+Create a file named `.env` in the root directory of the project and add your Groq API key:
 
 ```env
 GROQ_API_KEY=gsk_your_actual_groq_api_key_here
 ```
 
-### 4. Run the Agent
+---
 
-Make sure `orders_data.csv` is **closed in Excel** (so your OS doesn't lock the file from being updated), then run:
+## 🖥️ Option A: Running the Interactive Streamlit UI (Recommended for Live Demos)
+
+Launch the web dashboard with:
+
+```bash
+streamlit run app.py
+```
+
+### How to Demo with the Streamlit UI:
+1. **100% On-Demand Control:** When launched via Streamlit, the system waits for your command.
+2. **One-Click Demo Scenarios:** Click **Demo 1 (`ORD-1001`)**, **Demo 2 (`ORD-1002`)**, or **Demo 3 (`ORD-1003`)** on the left panel to watch the agent execute its 3 tool calls and display the expandable JSON trace cards in real time.
+3. **Demonstrate Human Supervisor Override:**
+   * Click **⚠️ Demo 2: Over Cap (`ORD-1002`)**. The agent will see that \$620 exceeds the \$250 cap and set the status to `ESCALATE_TO_HUMAN`.
+   * Go to the **👨‍💼 Human Supervisor Override Panel** on the right side, check *"Show only `ESCALATE_TO_HUMAN` orders needing review"*, select `ORD-1002`, and click **🛡️ Apply Human Supervisor Override** to approve it as a human manager!
+4. **Test Any of the 105 Orders:** Select any order from `ORD-1001` to `ORD-1105` in the dropdown to test the agent live during Q&A.
+
+---
+
+## 💻 Option B: Running via Terminal CLI (`python3 main.py`)
+
+If you run `main.py` directly in the terminal instead of Streamlit:
 
 ```bash
 python3 main.py
 ```
 
-## 🎯 Execution Flow: Automated Startup Demo + Interactive User Mode
-
-> **⚡ Important Note on Startup Behavior:**
-> When you run the script, **it does not immediately ask for user input.** Instead, the system **automatically executes 3 built-in demo test cases at the start** (`ORD-1001`, `ORD-1002`, and `ORD-1003`) to immediately showcase all three decision branches (`APPROVE_REFUND`, `ESCALATE_TO_HUMAN`, and `REJECT_REFUND`) in your terminal. **Only after these 3 automated runs finish** does the system open the interactive prompt for you to type your own requests.
-
-### Phase 1: Automatic Demo Execution (Runs Immediately on Startup)
-As soon as you launch the script, you will see the agent autonomously process 3 pre-configured customer tickets step-by-step (`Step 1 -> Step 2 -> Step 3`):
-
-1. **`ORD-1001` (Auto-Approve via VIP Exception):** Purchased 34 days ago (\$180). Exceeds the standard 30-day Electronics window, *but* the customer is a `Gold` member (45-day window). Result: **`APPROVE_REFUND`**.
-2. **`ORD-1002` (Escalate due to Dollar Cap):** Purchased 10 days ago (\$620). Within the 30-day window, *but* exceeds the \$250 auto-refund cap. Result: **`ESCALATE_TO_HUMAN`**.
-3. **`ORD-1003` (Reject due to Expired Window):** Purchased 40 days ago (\$95) by a `Standard` tier member (30-day limit). Result: **`REJECT_REFUND`**.
-
-### Phase 2: Live Interactive User Mode (Starts After the Demo Finishes)
-Once the 3 automatic demo tickets complete, the terminal displays:
-```text
-===========================================================================
-INTERACTIVE DEMO MODE (Type any order ID from ORD-1001 to ORD-1105, or 'exit' to quit)
-===========================================================================
-Enter a customer request (e.g., 'Refund order ORD-1042') or 'exit':
-```
-Now you (or your professor) can type any natural-language refund request for **any order between `ORD-1001` and `ORD-1105`**, such as:
-* `Refund order ORD-1042 please`
-* `Hi, I want to return my item from order ORD-1005`
-* `Can I get a refund on ORD-1088?`
-
-Type `exit` or `q` and press **Enter** when you are ready to close the program.
-
-### Phase 3: Verify the Output in Excel
-Because the agent writes its decisions directly to disk during both Phase 1 and Phase 2, you can open `orders_data.csv` in Excel or VS Code after running the script to view the updated `resolution_action`, `ticket_id`, and `resolution_reason` columns. *(Note: If you run the script multiple times, `Step 1` will show the saved `resolution_action` from your previous run because the CSV file retains its updated state.)*
+> **⚡ Important Note on Terminal Startup Behavior:**
+> When you run `python3 main.py`, **it automatically executes the 3 built-in demo test cases at the start** (`ORD-1001`, `ORD-1002`, and `ORD-1003`) to immediately showcase all three decision branches (`APPROVE_REFUND`, `ESCALATE_TO_HUMAN`, and `REJECT_REFUND`). **Right after these 3 automated runs finish**, the script unlocks the `INTERACTIVE DEMO MODE` prompt where you can type any order ID (`ORD-1001` to `ORD-1105`) or `exit` to quit.
